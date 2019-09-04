@@ -19,6 +19,10 @@ from scipy.sparse import csc_matrix
 from sklearn.decomposition import TruncatedSVD
 from matplotlib import ticker
 
+
+#From NID:
+import denoising
+
 # To do
 # split and merge functions
 
@@ -677,6 +681,7 @@ def ls_solve_ac(X, U, V, mask=None, beta_LS=None):
     beta_LS: 2d np.darray
         least square solution
     """
+    mask = None #Amol
     K = X.shape[1];
     if beta_LS is None:
         beta_LS = np.zeros([K,V.shape[0]]);
@@ -686,10 +691,13 @@ def ls_solve_ac(X, U, V, mask=None, beta_LS=None):
     beta_LS = beta_LS.T;
     for ii in range(K):
         if mask is None: ## for update temporal component c
-            beta_LS[[ii],:] = np.maximum(0, beta_LS[[ii],:] + ((UK[[ii],:] - np.matmul(VK[[ii],:],beta_LS))/aa[ii]));
+#             beta_LS[[ii],:] = np.maximum(0, beta_LS[[ii],:] + ((UK[[ii],:] - np.matmul(VK[[ii],:],beta_LS))/aa[ii]));
+            beta_LS[[ii],:] =  beta_LS[[ii],:] + ((UK[[ii],:] - np.matmul(VK[[ii],:],beta_LS))/aa[ii]);
+
         else:
             ind = (mask[ii,:]>0); ## for update spatial component a
-            beta_LS[[ii],ind] = np.maximum(0, beta_LS[[ii],ind] + ((UK[[ii],ind] - np.matmul(VK[[ii],:],beta_LS[:,ind]))/aa[ii]));
+#             beta_LS[[ii],ind] = np.maximum(0, beta_LS[[ii],ind] + ((UK[[ii],ind] - np.matmul(VK[[ii],:],beta_LS[:,ind]))/aa[ii]));
+            beta_LS[[ii],:] = beta_LS[[ii],:] + ((UK[[ii],:] - np.matmul(VK[[ii],:],beta_LS[:,:]))/aa[ii]);
     return beta_LS
 
 
@@ -721,7 +729,9 @@ def ls_solve_acc(X, U, V, mask=None, hals=False, beta_LS=None):
     beta_LS = beta_LS.T;
     for ii in range(K):
         if ii<K-1:
-            beta_LS[[ii],:] = np.maximum(0, beta_LS[[ii],:] + ((UK[[ii],:] - np.matmul(VK[[ii],:],beta_LS))/aa[ii]));
+#             beta_LS[[ii],:] = np.maximum(0, beta_LS[[ii],:] + ((UK[[ii],:] - np.matmul(VK[[ii],:],beta_LS))/aa[ii]));
+            beta_LS[[ii],:] = beta_LS[[ii],:] + ((UK[[ii],:] - np.matmul(VK[[ii],:],beta_LS))/aa[ii]);
+
         else:
             beta_LS[[ii],:] = beta_LS[[ii],:] + ((UK[[ii],:] - np.matmul(VK[[ii],:],beta_LS))/aa[ii]);
     return beta_LS
@@ -2092,7 +2102,7 @@ def vcorrcoef_Y(U, c):
     return np.matmul(U - U.mean(axis=1,keepdims=True), temp/np.std(temp, axis=0, keepdims=True));
 
 
-def ls_solve_ac_Y(X, U, mask=None, beta_LS=None):
+def ls_solve_ac_Y(X, U, mask=None, beta_LS=None, spatial=False):
     """
     least square solution.
 
@@ -2110,19 +2120,59 @@ def ls_solve_ac_Y(X, U, mask=None, beta_LS=None):
     beta_LS: 2d np.darray
         least square solution
     """
+    mask = None #AMOL: Set Mask to None
     K = X.shape[1];
+    print("K is {}".format(K))
+    print("Shape of X in ls_solve_ac_Y is {}".format(X.shape))
     if beta_LS is None:
         beta_LS = np.zeros([K,U.shape[1]]);
+    print("Shape of U is {}".format(U.shape))
     UK = np.matmul(X.T, U);
+    UK2 = UK.copy()
+    print("The shape of UK is {}".format(UK.shape))
+    #THIS IS WHERE WE INTRODUCE THE CODE TO DO DENOISING OF c*Y
+#     if spatial:
+#         denoiser = denoising.denoiser("DnCNN", DnCNNfile = '/data/home/app2139/NID/logs/net_17.pth')
+#         for i in range(UK.shape[0]): #For each neuron trace...
+#             currArray = UK[i, :].squeeze()
+#             currArray =  currArray.reshape((60,60))
+            
+#             #Denoise
+#             currArray = denoiser.denoise(currArray)
+#             print("we did one denoising!")
+            
+#             UK[i, :] = currArray.flatten()
+#         print(np.array_equal(UK, UK2))
+#         print("that verifies that the reshape and flatten produce the same thing")
+    
+    
     VK = np.matmul(X.T, X);
     aa = np.diag(VK);
     beta_LS = beta_LS.T;
     for ii in range(K):
         if mask is None:
             beta_LS[[ii],:] = np.maximum(0, beta_LS[[ii],:] + ((UK[[ii],:] - np.matmul(VK[[ii],:],beta_LS))/aa[ii]));
+#             beta_LS[[ii],:] = beta_LS[[ii],:] + ((UK[[ii],:] - np.matmul(VK[[ii],:],beta_LS))/aa[ii]);  #AMOL
+
         else:
             ind = (mask[ii,:]>0);
             beta_LS[[ii],ind] = np.maximum(0, beta_LS[[ii],ind] + ((UK[[ii],ind] - np.matmul(VK[[ii],:],beta_LS[:,ind]))/aa[ii]));
+#             beta_LS[[ii],:] =  np.maximum(0, beta_LS[[ii],:] + ((UK[[ii],:] - np.matmul(VK[[ii],:],beta_LS[:,:]))/aa[ii]));  #AMOL
+
+    if spatial:
+        denoiser = denoising.denoiser("DnCNN", DnCNNfile = '/data/home/app2139/NID/logs/net_17.pth')
+        for i in range(beta_LS.shape[0]): #For each neuron trace...
+            currArray = beta_LS[i, :].squeeze()
+            currArray =  currArray.reshape((60,60))
+            
+            #Denoise
+            currArray = denoiser.denoise(currArray)
+            print("we did one denoising!")
+            currArray = np.maximum(0, currArray)
+            
+            beta_LS[i, :] = currArray.flatten()
+
+
     return beta_LS
 
 
@@ -2153,7 +2203,8 @@ def ls_solve_acc_Y(X, U, mask=None, beta_LS=None):
     beta_LS = beta_LS.T;
     for ii in range(K):
         if ii<K-1:
-            beta_LS[[ii],:] = np.maximum(0, beta_LS[[ii],:] + ((UK[[ii],:] - np.matmul(VK[[ii],:],beta_LS))/aa[ii]));
+#             beta_LS[[ii],:] = np.maximum(0, beta_LS[[ii],:] + ((UK[[ii],:] - np.matmul(VK[[ii],:],beta_LS))/aa[ii]));
+            beta_LS[[ii],:] = np.maximum(0, beta_LS[[ii],:] + ((UK[[ii],:] - np.matmul(VK[[ii],:],beta_LS))/aa[ii]));  #AMOL
         else:
             beta_LS[[ii],:] = beta_LS[[ii],:] + ((UK[[ii],:] - np.matmul(VK[[ii],:],beta_LS))/aa[ii]);
     return beta_LS
@@ -2248,8 +2299,9 @@ def merge_components_Y(a,c,corr_img_all_r,U,normalize_factor,num_list,patch_size
 
 def update_AC_l2_Y(U, normalize_factor, a, c, b, patch_size, corr_th_fix, 
             maxiter=50, tol=1e-8, update_after=None,merge_corr_thr=0.5,
-            merge_overlap_thr=0.7, num_plane=1, plot_en=False, max_allow_neuron_size=0.2):
+            merge_overlap_thr=0.7, num_plane=1, plot_en=False, max_allow_neuron_size=0.2, spatial = False):
 
+    print("AMOL")
     K = c.shape[1];
     res = np.zeros(maxiter);
     uv_mean = U.mean(axis=1,keepdims=True);
@@ -2264,19 +2316,27 @@ def update_AC_l2_Y(U, normalize_factor, a, c, b, patch_size, corr_th_fix,
 
     for iters in range(maxiter):
         start = time.time();
-        a = ls_solve_ac_Y(c, (U-b).T, mask=mask_a.T, beta_LS=a).T;
+        if iters <15:
+            a = ls_solve_ac_Y(c, (U-b).T, mask=mask_a.T, beta_LS=a, spatial=True).T;  #Spatial Update 
+        else:
+            a = ls_solve_ac_Y(c, (U-b).T, mask=mask_a.T, beta_LS=a).T;
 
         temp = (a.sum(axis=0) == 0);
         if sum(temp):
+            print("the sum of a is zero..")
             a, c, corr_img_all_r, mask_a, num_list = delete_comp(a, c, corr_img_all_r, mask_a, num_list, temp, "zero a!", plot_en);
         b = np.maximum(0, uv_mean-((a*(c.mean(axis=0,keepdims=True))).sum(axis=1,keepdims=True)));
 
         c = ls_solve_ac_Y(a, U-b, mask=None, beta_LS=c).T;
         temp = (c.sum(axis=0) == 0);
+        print(len(temp))
         if sum(temp):
+            print("the sum of c is zero...")
             a, c, corr_img_all_r, mask_a, num_list = delete_comp(a, c, corr_img_all_r, mask_a, num_list, temp, "zero c!", plot_en);
         b = np.maximum(0, uv_mean-(a*(c.mean(axis=0,keepdims=True))).sum(axis=1,keepdims=True));
 
+        print("the shape of a is {}".format(a.shape))
+        print("the shape of c is {}".format(c.shape))
         if update_after and ((iters+1) % update_after == 0):
             corr_img_all = vcorrcoef_Y(U/normalize_factor, c);
             rlt = merge_components_Y(a,c,corr_img_all, U, normalize_factor,num_list,patch_size,merge_corr_thr=merge_corr_thr,merge_overlap_thr=merge_overlap_thr,plot_en=plot_en);
@@ -2522,7 +2582,7 @@ def demix_whole_data(Yd, cut_off_point=[0.95,0.9], length_cut=[15,10], th=[2,1],
             a, c, b, fb, ff, res, corr_img_all_r, num_list = update_AC_l2_Y(Yd.reshape(np.prod(dims),-1,order="F"), normalize_factor, a, c, b, dims,
                                         corr_th_fix, maxiter=maxiter, tol=1e-8, update_after=update_after,
                                         merge_corr_thr=merge_corr_thr,merge_overlap_thr=merge_overlap_thr, num_plane=num_plane, plot_en=plot_en, max_allow_neuron_size=max_allow_neuron_size);
-        print("time: " + str(time.time()-start));
+        print("time: AMOL " + str(time.time()-start));
         superpixel_rlt.append({'connect_mat_1':connect_mat_1, 'pure_pix':pure_pix, 'unique_pix':unique_pix, 'brightness_rank':brightness_rank, 'brightness_rank_sup':brightness_rank_sup});
         if pass_num > 1 and ii == 0:
             rlt = {'a':a, 'c':c, 'b':b, "fb":fb, "ff":ff, 'res':res, 'corr_img_all_r':corr_img_all_r, 'num_list':num_list};
@@ -2560,3 +2620,4 @@ def demix_whole_data(Yd, cut_off_point=[0.95,0.9], length_cut=[15,10], th=[2,1],
         return {'rlt':rlt, 'fin_rlt':fin_rlt, "superpixel_rlt":superpixel_rlt}
     else:
         return {'fin_rlt':fin_rlt, "superpixel_rlt":superpixel_rlt}
+
